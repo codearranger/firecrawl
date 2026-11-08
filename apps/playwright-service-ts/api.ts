@@ -12,6 +12,16 @@ import UserAgent from 'user-agents';
 import { getError } from './helpers/get_error';
 import { Server } from 'proxy-chain';
 import { isInternalHost, ssrfPrepareRequest } from './helpers/ssrf';
+import {
+  ActionError,
+  buildEmulationOptions,
+  runActions,
+  takeScreenshot,
+  type ActionResults,
+  type BrowserAction,
+  type LocationOptions,
+  type ScreenshotOptions,
+} from './helpers/browserFeatures';
 
 dotenv.config();
 
@@ -156,6 +166,11 @@ interface UrlModel {
   headers?: { [key: string]: string };
   check_selector?: string;
   skip_tls_verification?: boolean;
+  // Self-hosted extensions (see helpers/browserFeatures.ts).
+  screenshot?: ScreenshotOptions;
+  actions?: BrowserAction[];
+  mobile?: boolean;
+  location?: LocationOptions;
 }
 
 let browser: Browser;
@@ -178,6 +193,7 @@ const initializeBrowser = async () => {
 const createContext = async (
   skipTlsVerification: boolean = false,
   userAgentOverride?: string,
+  emulation: Record<string, unknown> = {},
 ): Promise<{
   context: BrowserContext;
   securityState: ContextSecurityState;
@@ -193,6 +209,10 @@ const createContext = async (
     viewport,
     ignoreHTTPSErrors: skipTlsVerification,
     serviceWorkers: 'block',
+    // Mobile/location emulation overrides the defaults above; an explicit
+    // User-Agent header from the caller still wins.
+    ...emulation,
+    ...(userAgentOverride ? { userAgent: userAgentOverride } : {}),
   };
 
   contextOptions.proxy = {
@@ -264,6 +284,7 @@ const scrapePage = async (
   timeout: number,
   checkSelector: string | undefined,
   securityState: ContextSecurityState,
+  extras: { actions?: BrowserAction[]; screenshot?: ScreenshotOptions } = {},
 ) => {
   console.log(
     `Navigating to ${url} with waitUntil: ${waitUntil} and timeout: ${timeout}ms`,
@@ -293,6 +314,16 @@ const scrapePage = async (
     }
   }
 
+  // Actions run before the final content/screenshot capture, matching
+  // fire-engine: the returned HTML reflects the page after all actions.
+  let actionResults: ActionResults | undefined;
+  if (extras.actions && extras.actions.length > 0) {
+    actionResults = await runActions(page, extras.actions);
+  }
+  const screenshot = extras.screenshot
+    ? await takeScreenshot(page, extras.screenshot)
+    : undefined;
+
   let headers = null,
     content = await page.content(),
     landedUrl = page.url();
@@ -321,6 +352,8 @@ const scrapePage = async (
     status: response ? response.status() : null,
     headers,
     contentType: ct,
+    screenshot,
+    actions: actionResults,
   };
 };
 
@@ -357,6 +390,10 @@ app.post('/scrape', async (req: Request, res: Response) => {
     headers,
     check_selector,
     skip_tls_verification = false,
+    screenshot,
+    actions,
+    mobile = false,
+    location,
   }: UrlModel = req.body;
 
   console.log(`================= Scrape Request =================`);
@@ -366,6 +403,9 @@ app.post('/scrape', async (req: Request, res: Response) => {
   console.log(`Headers: ${headers ? JSON.stringify(headers) : 'None'}`);
   console.log(`Check Selector: ${check_selector ? check_selector : 'None'}`);
   console.log(`Skip TLS Verification: ${skip_tls_verification}`);
+  console.log(
+    `Screenshot: ${screenshot ? JSON.stringify(screenshot) : 'None'} | Actions: ${actions?.length ?? 0} | Mobile: ${mobile} | Location: ${location ? JSON.stringify(location) : 'None'}`,
+  );
   console.log(`==================================================`);
 
   if (!url) {
@@ -418,6 +458,7 @@ app.post('/scrape', async (req: Request, res: Response) => {
     const contextBundle = await createContext(
       skip_tls_verification,
       userAgentOverride,
+      buildEmulationOptions(mobile, location),
     );
     requestContext = contextBundle.context;
     securityState = contextBundle.securityState;
@@ -501,6 +542,7 @@ app.post('/scrape', async (req: Request, res: Response) => {
       timeout,
       check_selector,
       securityState,
+      { actions, screenshot },
     );
     const pageError =
       result.status !== 200 ? getError(result.status) : undefined;
@@ -518,6 +560,8 @@ app.post('/scrape', async (req: Request, res: Response) => {
       pageStatusCode: result.status,
       contentType: result.contentType,
       url: result.url,
+      ...(result.screenshot && { screenshot: result.screenshot }),
+      ...(result.actions && { actions: result.actions }),
       ...(pageError && { pageError }),
     });
   } catch (error) {
@@ -527,6 +571,10 @@ app.post('/scrape', async (req: Request, res: Response) => {
         pageStatusCode: 403,
         pageError: error.message,
       });
+    }
+    if (error instanceof ActionError) {
+      console.warn('Action error:', error.message);
+      return res.status(500).json({ error: error.message });
     }
     console.error('Scrape error:', error);
     res

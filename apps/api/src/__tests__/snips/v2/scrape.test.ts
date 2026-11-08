@@ -421,7 +421,9 @@ describe("Scrape tests", () => {
     scrapeTimeout,
   );
 
-  itIf(TEST_SELF_HOST && !HAS_FIRE_ENGINE)(
+  itIf(
+    TEST_SELF_HOST && !HAS_FIRE_ENGINE && !config.PLAYWRIGHT_EXTENDED_FEATURES,
+  )(
     "rejects actions when fire-engine is not configured",
     async () => {
       const raw = await scrapeRaw(

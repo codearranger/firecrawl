@@ -250,7 +250,7 @@ const OPENAI_SCHEMA_ERROR_MESSAGE =
 
 const ACTIONS_MAX_WAIT_TIME = 60;
 const MAX_ACTIONS = 50;
-function calculateTotalWaitTime(
+export function calculateTotalWaitTime(
   actions: any[] = [],
   waitFor: number = 0,
 ): number {

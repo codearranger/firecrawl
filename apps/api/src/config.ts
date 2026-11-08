@@ -520,6 +520,9 @@ const configSchema = z.object({
 
   // External Services
   PLAYWRIGHT_MICROSERVICE_URL: z.string().optional(),
+  // Set when PLAYWRIGHT_MICROSERVICE_URL points at a playwright-service that
+  // supports screenshots, actions, mobile and location emulation.
+  PLAYWRIGHT_EXTENDED_FEATURES: z.stringbool().optional(),
   HTML_TO_MARKDOWN_SERVICE_URL: z.string().optional(),
   SMART_SCRAPE_API_URL: z.string().optional(),
 

@@ -68,7 +68,9 @@ export type ErrorCodes =
   | "zdr_expired"
   | "zdr_no_snapshots"
   | "zdr_not_enabled"
-  | "zdr_retention_misconfigured";
+  | "zdr_retention_misconfigured"
+  // Self-hosted agent service: the job id is unknown to it.
+  | "agent_not_found";
 
 export class TransportableError extends Error {
   public readonly code: ErrorCodes;

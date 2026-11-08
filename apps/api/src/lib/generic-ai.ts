@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { config } from "../config";
@@ -144,6 +145,53 @@ function getUsOnlyModel(
   throw usOnlyUnavailable(feature);
 }
 
+/**
+ * Whether a provider has what it needs to make a call. Providers built from
+ * the bare AI SDK exports read their keys from process.env.
+ */
+function providerConfigured(provider: Provider): boolean {
+  switch (provider) {
+    case "openai":
+      return !!(config.OPENAI_API_KEY || config.OPENAI_BASE_URL);
+    case "ollama":
+      return !!config.OLLAMA_BASE_URL;
+    case "anthropic":
+      return !!config.ANTHROPIC_API_KEY;
+    case "google":
+      // @ai-sdk/google only reads this variable (not GEMINI_API_KEY).
+      return !!process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    case "vertex":
+      return !!config.VERTEX_CREDENTIALS || existsSync("./gke-key.json");
+    case "fireworks":
+      return !!process.env.FIREWORKS_API_KEY;
+    case "groq":
+      return !!process.env.GROQ_API_KEY;
+    case "deepinfra":
+      return !!process.env.DEEPINFRA_API_KEY;
+    case "openrouter":
+      return !!config.OPENROUTER_API_KEY;
+    case "extraction":
+      return !!config.EXTRACTION_PROVIDER_BASE_URL;
+  }
+}
+
+/**
+ * Self-hosted deployments usually have only one model endpoint (OpenAI, an
+ * OpenAI-compatible server, or Ollama). Features hard-wired to another
+ * provider (e.g. the `query` format, /extract reranking and interact use
+ * Gemini) are routed to that endpoint instead of failing. Returns undefined
+ * when no rerouting is needed or possible.
+ */
+export function resolveLocalFallback(
+  provider: Provider,
+): Exclude<Provider, "extraction"> | undefined {
+  if (providerConfigured(provider)) return undefined;
+  if (provider !== defaultProvider && providerConfigured(defaultProvider)) {
+    return defaultProvider;
+  }
+  return undefined;
+}
+
 export function getModel(
   name: string,
   provider: Provider = defaultProvider,
@@ -151,6 +199,16 @@ export function getModel(
 ) {
   if (name === "gemini-2.5-pro") {
     name = "gemini-2.5-pro";
+  }
+  const fallback = isUsOnly(options?.teamFlags ?? undefined)
+    ? undefined
+    : resolveLocalFallback(provider);
+  if (fallback) {
+    // The requested model name belongs to the unavailable provider, so the
+    // deployment's MODEL_NAME is used even when the caller asked to ignore it.
+    return withUsageTelemetry(
+      providerList[fallback](config.MODEL_NAME || name),
+    );
   }
   const modelName = options?.ignoreModelOverride
     ? name
@@ -184,5 +242,6 @@ export function getEmbeddingModel(
     }
     return usOpenAI.embedding(modelName);
   }
-  return providerList[provider].embedding(modelName);
+  const fallback = resolveLocalFallback(provider);
+  return providerList[fallback ?? provider].embedding(modelName);
 }

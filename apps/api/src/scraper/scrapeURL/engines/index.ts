@@ -69,6 +69,7 @@ export type Engine =
   | "wikipedia"
   | "x-twitter";
 
+const playwrightExtendedFeatures = config.PLAYWRIGHT_EXTENDED_FEATURES === true;
 const usePlaywright =
   config.PLAYWRIGHT_MICROSERVICE_URL !== "" &&
   config.PLAYWRIGHT_MICROSERVICE_URL !== undefined;
@@ -411,18 +412,21 @@ const engineOptions: {
   },
   playwright: {
     features: {
-      actions: false,
+      // Screenshots, actions, mobile and location emulation are implemented by
+      // the bundled playwright-service (helpers/browserFeatures.ts). Gated so
+      // deployments still running an older service keep falling back cleanly.
+      actions: playwrightExtendedFeatures,
       waitFor: true,
-      screenshot: false,
-      "screenshot@fullScreen": false,
+      screenshot: playwrightExtendedFeatures,
+      "screenshot@fullScreen": playwrightExtendedFeatures,
       pdf: false,
       document: false,
       image: false,
       audio: false,
       video: false,
       atsv: false,
-      location: false,
-      mobile: false,
+      location: playwrightExtendedFeatures,
+      mobile: playwrightExtendedFeatures,
       skipTlsVerification: true,
       useFastMode: false,
       stealthProxy: false,

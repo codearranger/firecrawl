@@ -1,3 +1,4 @@
+import { config } from "../config";
 import { isUuidV7Id } from "./bigtable-row-key";
 import { logger } from "./logger";
 import {
@@ -54,9 +55,24 @@ export function getExtractJobAccess(
   return resolveOperationalJobAccess({ id, kinds: ["extract", "agent"] });
 }
 
+/** How long a self-hosted agent job stays fetchable (matches the default). */
+const SELF_HOSTED_AGENT_ACCESS_TTL_MS = 24 * 60 * 60 * 1000;
+
 export function getAgentJobAccess(
   id: string,
 ): Promise<OperationalJobAccess | null> {
+  // Self-hosted without DB auth or Bigtable: there is a single "bypass"
+  // team and no job-access store, so ownership is not tracked. The agent
+  // service (EXTRACT_V3_BETA_URL) is the source of truth for whether the
+  // job exists, like /v2/extract/:id in the same mode.
+  if (!config.USE_DB_AUTHENTICATION && !config.BIGTABLE_JOB_ACCESS_TABLE) {
+    if (!isUuidV7Id(id)) return Promise.resolve(null);
+    return Promise.resolve({
+      teamId: "bypass",
+      kind: "agent",
+      expiresAtMs: Date.now() + SELF_HOSTED_AGENT_ACCESS_TTL_MS,
+    });
+  }
   return resolveOperationalJobAccess({ id, kinds: ["agent"] });
 }
 

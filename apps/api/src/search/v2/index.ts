@@ -3,6 +3,7 @@ import { config } from "../../config";
 import { fire_engine_search_v2 } from "./fireEngine-v2";
 import { searxng_search } from "./searxng";
 import { ddgSearch } from "./ddgsearch";
+import { filterByDomains } from "./domain-filter";
 import { Logger } from "winston";
 import { UsOnlyUnavailableError } from "../../scraper/scrapeURL/error";
 
@@ -75,21 +76,31 @@ export async function search({
       return results;
     }
 
-    // includeDomains/excludeDomains are enforced on returned URLs only on
-    // the fire engine path above; the fallback providers below receive them
-    // solely as the site: chain baked into the query.
+    // includeDomains/excludeDomains reach the fallback providers as the
+    // site: chain baked into the query; SearXNG results are also filtered
+    // here since many of its engines ignore site: operators.
     if (config.SEARXNG_ENDPOINT) {
       logger.info("Using searxng search");
-      const results = await searxng_search(query, {
-        num_results,
-        tbs,
-        filter,
-        lang,
-        country,
-        location,
-        safe,
-      });
-      if (results.web && results.web.length > 0) return results;
+      const results = filterByDomains(
+        await searxng_search(query, {
+          num_results,
+          tbs,
+          filter,
+          lang,
+          country,
+          location,
+          safe,
+          type,
+        }),
+        includeDomains,
+        excludeDomains,
+      );
+      if (
+        (results.web && results.web.length > 0) ||
+        (results.news && results.news.length > 0) ||
+        (results.images && results.images.length > 0)
+      )
+        return results;
     }
 
     logger.info("Using DuckDuckGo search");

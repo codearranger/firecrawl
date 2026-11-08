@@ -60,6 +60,13 @@ export async function getExtractV3AgentStatus(
 
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 404) {
+      throw new ExtractV3AgentStatusError(
+        404,
+        "agent_not_found",
+        "Agent job not found",
+      );
+    }
     if (response.status === 410) {
       let body: { code?: unknown; error?: unknown } | null = null;
       try {

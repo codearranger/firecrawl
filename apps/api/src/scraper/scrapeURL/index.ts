@@ -878,7 +878,7 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         fallbackList.every(engine => engine.unsupportedFeatures.has("actions"))
       ) {
         throw new ActionsNotSupportedError(
-          "Actions are not supported by any available engines. Actions require Fire Engine (fire-engine) to be enabled.",
+          "Actions are not supported by any available engines. Actions require Fire Engine (fire-engine), or a self-hosted playwright-service with PLAYWRIGHT_EXTENDED_FEATURES=true.",
         );
       }
     }

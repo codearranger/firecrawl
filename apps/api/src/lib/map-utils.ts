@@ -16,6 +16,12 @@ import {
   resolveRedirects,
 } from "./validateUrl";
 import { fireEngineMap } from "../search/fireEngine";
+import { useFireEngine } from "../scraper/scrapeURL/engines/fire-engine/available";
+import {
+  canUseSearxngForMap,
+  discoverLinksFromPage,
+  searxngMapSearch,
+} from "./map-selfhost-fallback";
 import { isUsOnly } from "./us-only";
 import { redisEvictConnection } from "../services/redis";
 import {
@@ -226,6 +232,9 @@ export async function getMapResults({
       : await redisEvictConnection.get(cacheKey);
 
     const fetchPage = async (page: number) => {
+      if (!useFireEngine && canUseSearxngForMap()) {
+        return await searxngMapSearch(mapUrl, resultsPerPage, page);
+      }
       return await fireEngineMap(
         mapUrl,
         {
@@ -262,7 +271,9 @@ export async function getMapResults({
       fetchAllPages(),
     ]);
 
-    if (!zeroDataRetention) {
+    // Don't cache empty discoveries: a later request (or a newly configured
+    // search backend) should get another chance.
+    if (!zeroDataRetention && searchResults.flat().length > 0) {
       await redisEvictConnection.set(
         cacheKey,
         JSON.stringify(searchResults),
@@ -295,6 +306,24 @@ export async function getMapResults({
       } catch (e) {
         // Silently handle sitemap errors
       }
+    }
+
+    // Self-hosted: with no fire-engine/index, sites without a sitemap would
+    // otherwise map to nothing. Fall back to the links on the start page.
+    if (
+      !useFireEngine &&
+      !indexOnly &&
+      mapResults.length + searchResults.flat().length < limit
+    ) {
+      const pageLinks = await discoverLinksFromPage({
+        url,
+        crawler,
+        abort,
+        zeroDataRetention,
+        location,
+        headers,
+      });
+      mapResults.push(...pageLinks.map(x => ({ url: x })));
     }
 
     if (search) {

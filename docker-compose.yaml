@@ -58,9 +58,27 @@ x-common-env: &common-env
   # Set NUQ_BACKEND=fdb to run the queue on FoundationDB instead of Postgres
   NUQ_BACKEND: ${NUQ_BACKEND}
   FDB_CLUSTER_FILE: ${NUQ_BACKEND:+/var/fdb/fdb.cluster}
+  MAX_CPU: ${MAX_CPU}
+  MAX_RAM: ${MAX_RAM}
+  # --- Self-hosted open-source replacements for cloud-only features ---
+  # Screenshots, actions, mobile and location emulation in playwright-service.
+  PLAYWRIGHT_EXTENDED_FEATURES: ${PLAYWRIGHT_EXTENDED_FEATURES:-true}
+  # Native (Rust) text extraction for text-based PDFs.
+  PDF_RUST_EXTRACT_ENABLE: ${PDF_RUST_EXTRACT_ENABLE:-true}
+  # Scanned-PDF and image OCR via ocr-service (fire-pdf compatible API).
+  FIRE_PDF_ENABLE: ${FIRE_PDF_ENABLE:-true}
+  FIRE_PDF_BASE_URL: ${FIRE_PDF_BASE_URL:-http://ocr-service:3010}
+  FIRE_PDF_API_KEY: ${OCR_API_KEY}
+  FIRE_PDF_PERCENT: ${FIRE_PDF_PERCENT:-100}
+  FIRE_PDF_BY_REFERENCE_ENABLE: ${FIRE_PDF_BY_REFERENCE_ENABLE:-false}
+  IMAGE_OCR_ENABLED: ${IMAGE_OCR_ENABLED:-true}
+  # /v2/agent via agent-service.
+  EXTRACT_V3_BETA_URL: ${EXTRACT_V3_BETA_URL:-http://agent-service:3020}
+  AGENT_INTEROP_SECRET: ${AGENT_INTEROP_SECRET}
 
 services:
   playwright-service:
+    restart: unless-stopped
     # NOTE: If you don't want to build the service locally,
     # comment out the build: statement and uncomment the image: statement
     # image: ghcr.io/firecrawl/playwright-service:latest
@@ -94,6 +112,7 @@ services:
       - /tmp/.cache:noexec,nosuid,size=1g
 
   api:
+    restart: unless-stopped
     <<: *common-service
     environment:
       <<: *common-env
@@ -104,6 +123,7 @@ services:
       NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
       HARNESS_STARTUP_TIMEOUT_MS: ${HARNESS_STARTUP_TIMEOUT_MS:-60000}
       ENV: local
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       redis:
         condition: service_started
@@ -128,6 +148,7 @@ services:
     memswap_limit: 8G
 
   redis:
+    restart: unless-stopped
     # NOTE: If you want to use Valkey (open source) instead of Redis (source available),
     # uncomment the Valkey statement and comment out the Redis statement.
     # Using Valkey with Firecrawl is untested and not guaranteed to work. Use with caution.
@@ -136,7 +157,9 @@ services:
 
     networks:
       - backend
-    command: redis-server --bind 0.0.0.0
+    volumes:
+      - redis:/data
+    command: redis-server --bind 0.0.0.0 --appendonly yes
     logging:
       driver: "json-file"
       options:
@@ -145,16 +168,18 @@ services:
         compress: "true"
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3-management
     networks:
       - backend
     command: rabbitmq-server
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
-      interval: 5s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 180s
+      start_interval: 5s
     logging:
       driver: "json-file"
       options:
@@ -163,6 +188,7 @@ services:
         compress: "true"
 
   nuq-postgres:
+    restart: unless-stopped
     # NOTE: If you don't want to build the image locally,
     # comment out the build: statement and uncomment the image: statement
     # image: ghcr.io/firecrawl/nuq-postgres:latest
@@ -194,6 +220,8 @@ services:
   # NUQ_BACKEND=fdb; the api container reads the shared cluster file from the
   # fdb-cluster-file volume. Replaces nuq-postgres once stable.
   foundationdb:
+    # Only started with `--profile fdb` (NUQ_BACKEND=fdb).
+    profiles: ["fdb"]
     image: foundationdb/foundationdb:7.3.63
     environment:
       FDB_NETWORKING_MODE: container
@@ -212,6 +240,7 @@ services:
 
   # one-shot: creates the database on first boot (no-op afterwards)
   foundationdb-init:
+    profiles: ["fdb"]
     image: foundationdb/foundationdb:7.3.63
     depends_on:
       - foundationdb
@@ -225,10 +254,128 @@ services:
       - backend
     restart: "no"
 
+  # OCR for scanned PDFs and images (apps/ocr-service). Uses a vision model on
+  # Ollama by default; set OCR_BACKEND=mineru + MINERU_URL to use MinerU.
+  ocr-service:
+    restart: unless-stopped
+    build: apps/ocr-service
+    environment:
+      OCR_BACKEND: ${OCR_BACKEND:-ollama}
+      OLLAMA_URL: ${OCR_OLLAMA_URL:-http://host.docker.internal:11434}
+      OCR_MODEL: ${OCR_MODEL:-qwen2.5vl:7b}
+      OCR_CONCURRENCY: ${OCR_CONCURRENCY:-2}
+      MINERU_URL: ${MINERU_URL}
+      OCR_API_KEY: ${OCR_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3010/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # Backend for /v2/agent (apps/agent-service): tool-calling research loop on
+  # a local OpenAI-compatible model, using this API's search and scrape.
+  agent-service:
+    restart: unless-stopped
+    build: apps/agent-service
+    environment:
+      AGENT_INTEROP_SECRET: ${AGENT_INTEROP_SECRET}
+      FIRECRAWL_API_URL: http://api:3002
+      LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}}
+      LLM_API_KEY: ${OPENAI_API_KEY:-ollama}
+      AGENT_MODEL: ${AGENT_MODEL:-ministral-3:14b}
+      AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-12}
+      SELF_HOSTED_WEBHOOK_HMAC_SECRET: ${SELF_HOSTED_WEBHOOK_HMAC_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3020/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # Ingestion UI. Upstream removed apps/ui in 2026 (#5012); this keeps the
+  # previously built image running.
+  ui:
+    restart: unless-stopped
+    image: firecrawl-ui
+    pull_policy: never
+    ports:
+      - "3081:3000"
+    environment:
+      - FIRECRAWL_API_URL=http://api:3002
+    depends_on:
+      - api
+    networks:
+      - backend
+
+  mcp-server:
+    build:
+      context: https://github.com/mendableai/firecrawl-mcp-server.git
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3000"
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-http://api:3002}
+      - HOST=0.0.0.0
+      - PORT=3000
+      - SSE_LOCAL=true
+      - SSE_HOST=0.0.0.0
+    command: ["node", "dist/server.js", "--http"]
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - api
+    networks:
+      - backend
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - path: .env.tunnel
+        required: false
+    expose:
+      - 20241/tcp
+    environment:
+      - TUNNEL_METRICS=0.0.0.0:20241
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - api
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 networks:
   backend:
     driver: bridge
 
 volumes:
+  redis:
   fdb-data:
   fdb-cluster-file:

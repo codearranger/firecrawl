@@ -46,6 +46,11 @@ At this revision, Compose runs the Firecrawl API and workers, Playwright, Redis,
 RabbitMQ, NuQ PostgreSQL, and FoundationDB services for the optional queue
 backend. Only the API is published to the host by default, on port `3002`.
 
+This fork also runs `ocr-service` and `agent-service`, open-source
+replacements for cloud-only features (screenshots, actions, OCR, `/v2/agent`
+and more). See [SELF_HOST_OSS_FEATURES.md](SELF_HOST_OSS_FEATURES.md).
+FoundationDB only starts with `--profile fdb`.
+
 Self-hosting gives you source and infrastructure control. You also own
 security, availability, capacity, upgrades, data retention, and compliance.
 

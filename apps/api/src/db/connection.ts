@@ -160,23 +160,34 @@ export function getDbPoolMetrics(): string {
 
 const useDbAuthentication = config.USE_DB_AUTHENTICATION;
 
-const mainDb = useDbAuthentication
-  ? makeDb(config.DATABASE_URL, "firecrawl-api", "main")
-  : null;
+/**
+ * Self-hosted deployments without DB authentication can still point
+ * DATABASE_URL at a local Postgres that holds only the browser session
+ * tables (apps/hangar/sessions-db.sql), which browser sessions and interact
+ * need. Everything gated on USE_DB_AUTHENTICATION stays off.
+ */
+export const selfHostedSessionDb =
+  !useDbAuthentication && !!config.DATABASE_URL;
+
+const mainDb =
+  useDbAuthentication || selfHostedSessionDb
+    ? makeDb(config.DATABASE_URL, "firecrawl-api", "main")
+    : null;
 // Without a distinct replica URL the "replica" pool points at the primary's
 // pooler, so it must not hold a second warm set of connections there.
-const replicaDb = useDbAuthentication
-  ? makeDb(
-      config.DATABASE_REPLICA_URL ?? config.DATABASE_URL,
-      "firecrawl-api-rr",
-      "replica",
-      {
-        keepWarm:
-          config.DATABASE_REPLICA_URL !== undefined &&
-          config.DATABASE_REPLICA_URL !== config.DATABASE_URL,
-      },
-    )
-  : null;
+const replicaDb =
+  useDbAuthentication || selfHostedSessionDb
+    ? makeDb(
+        config.DATABASE_REPLICA_URL ?? config.DATABASE_URL,
+        "firecrawl-api-rr",
+        "replica",
+        {
+          keepWarm:
+            config.DATABASE_REPLICA_URL !== undefined &&
+            config.DATABASE_REPLICA_URL !== config.DATABASE_URL,
+        },
+      )
+    : null;
 // The index pool was the sole consumer behind the 2026-06-11 pgbouncer
 // `08P01: no more connections allowed (max_client_conn)` incident. It runs
 // against the transaction pooler, so every profile caps it well below the

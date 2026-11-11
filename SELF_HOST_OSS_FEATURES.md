@@ -17,16 +17,17 @@ replacements so a self-hosted deployment can use them with local models.
 | Search `sources: ["news"]` / `["images"]` | fire-engine | SearXNG `news` / `images` categories | `SEARXNG_ENDPOINT` |
 | Search `includeDomains` / `excludeDomains` | fire-engine | filtered on SearXNG results | `SEARXNG_ENDPOINT` |
 | `/map` on sites without a sitemap | fire-engine search + index | SearXNG `site:` search and the links on the start page | automatic without fire-engine |
+| Browser sessions (`/v2/browser`: create, execute node/python/bash, CDP, live view, recording, profiles) | Hangar | `apps/hangar`: one sandbox container per session | `HANGAR_URL=http://hangar:3040`, `DATABASE_URL` (session tables), `HANGAR_PUBLIC_URL` |
+| `/v2/scrape/:id/interact` (code and prompt) | Hangar + Gemini | Hangar, plus the browser agent on `LOCAL_FALLBACK_MODEL_NAME` | same as above |
 
 `docker-compose.yaml` turns all of these on by default; each variable can be
 overridden in `.env`.
 
 ## Not covered
 
-- **Browser sessions and `/v2/scrape/:id/interact`.** The upstream backend
-  ("Hangar") also needs DB authentication (`USE_DB_AUTHENTICATION=true` with
-  the `browser_sessions` tables), a CDP endpoint reachable by clients, and a
-  code-execution runtime. Not implemented here.
+- **Browser session suspend/resume and proxy country selection.** Hangar
+  sessions run until stopped, idle or expired; `location.country` on a
+  session is accepted but egress uses the deployment's `PROXY_SERVER`.
 - **Stealth proxies, CAPTCHA solving, TLS fingerprinting** (fire-engine's
   anti-bot stack). Use `PROXY_SERVER` for a proxy; a geo-specific exit for
   `location` needs a proxy in that country.
@@ -86,3 +87,76 @@ keeps working.
 
 `apps/api/src/__tests__/snips/v2/selfhost-oss-features.test.ts` covers the
 features above against a running stack (`TEST_SUITE_SELF_HOSTED=true`).
+
+## Hangar: browser sessions and interact (`apps/hangar`)
+
+A self-hosted implementation of the browser service the API calls through
+`HANGAR_URL` (contract: `apps/api/src/lib/hangar.ts`).
+
+```
+Firecrawl API ──HTTP──▶ hangar (controller) ──Docker API──▶ hangar-docker-proxy ──▶ docker.sock
+     │                     │  public gateway :3030 (CDP, live view, recordings)
+     │                     ▼
+     │            sandbox container per session (internal network only)
+     │              Chromium · node/python Playwright · agent-browser · ffmpeg
+     │                     │
+     └── session tables    └──▶ hangar-egress (SSRF guard) ──▶ PROXY_SERVER ──▶ internet
+         in nuq-postgres
+```
+
+**Sandbox isolation.** Each session is its own container from
+`firecrawl-hangar-sandbox`, started with: a non-root user, every capability
+dropped, `no-new-privileges`, a read-only root filesystem (`/tmp` is a tmpfs),
+memory/CPU/PID limits, and only the internal `hangar-sandbox` network. The
+egress proxy is the only way out, and it refuses private, loopback and
+link-local targets, so session code cannot reach the LAN, the Firecrawl
+services or cloud metadata. Chromium's debugging port listens on
+127.0.0.1 inside the container; the sandbox agent requires a per-session
+token, and the controller refuses requests from the sandbox subnet. For a
+stronger boundary, install gVisor and set `HANGAR_SANDBOX_RUNTIME=runsc`.
+
+The controller reaches Docker only through `docker-socket-proxy` (container
+endpoints only). That proxy can still create containers, so treat the
+controller as privileged: its API (port 3040) is not published to the host.
+
+**What a session provides**
+
+- `execute`: `node` (Playwright with mutable `page`/`context`/`browser` and
+  top-level await; a `return` value becomes `result`), `python` (async
+  Playwright, set `result`), `bash` (with `agent-browser` attached). The page
+  the code ends on is the next run's `page`.
+- `cdpUrl`: `ws://…/cdp/<id>/<token>` for `playwright.chromium.connectOverCDP`
+  or Puppeteer.
+- `liveViewUrl` / `interactiveLiveViewUrl`: a browser page streaming the
+  screen; the interactive one forwards mouse, keyboard and navigation.
+- `recordSession`: HLS recording, served by `GET /v2/browser/:id/replay`.
+- `profile: {name, saveChanges}`: Chromium profile (cookies, storage)
+  persisted per team on the `hangar-data` volume; `saveChanges: false` starts
+  from a copy.
+- `blockAds`: uBlock Origin Lite.
+- Lifetime (`ttl`) and idle (`activityTtl`) limits, enforced by the
+  controller every 5 seconds.
+
+**Setup**
+
+```bash
+docker compose --profile build build hangar-sandbox   # sandbox image
+docker compose up -d hangar-db-init hangar hangar-egress hangar-docker-proxy api
+```
+
+| Variable | Default | |
+|---|---|---|
+| `HANGAR_PUBLIC_URL` | `http://localhost:3030` | how clients reach the gateway (CDP and live view URLs) |
+| `HANGAR_PUBLIC_PORT` | `3030` | host port for the gateway |
+| `HANGAR_MAX_SESSIONS` | `4` | concurrent sandboxes |
+| `HANGAR_SANDBOX_MEMORY_MB` / `HANGAR_SANDBOX_CPUS` | `2048` / `1.5` | per sandbox |
+| `HANGAR_SANDBOX_RUNTIME` | — | e.g. `runsc` |
+| `SELF_HOSTED_BROWSER_CONCURRENCY` | `10` | API-side cap when DB auth is off |
+| `LOCAL_FALLBACK_MODEL_NAME` | `ministral-3:14b` (compose) | model for the interact agent and other rerouted features |
+
+Without DB authentication the API keeps browser sessions in the
+`browser_sessions`, `browser_profiles` and `browser_session_activities` tables
+(`apps/hangar/sessions-db.sql`, created by `hangar-db-init`) via
+`DATABASE_URL`, reconciles them with Hangar from the API process, and keeps
+each scrape's replay context in Redis for 24 hours so interact can replay it.
+

@@ -75,6 +75,12 @@ x-common-env: &common-env
   # /v2/agent via agent-service.
   EXTRACT_V3_BETA_URL: ${EXTRACT_V3_BETA_URL:-http://agent-service:3020}
   AGENT_INTEROP_SECRET: ${AGENT_INTEROP_SECRET}
+  # Browser sessions and interact via the self-hosted Hangar (apps/hangar).
+  HANGAR_URL: ${HANGAR_URL:-http://hangar:3040}
+  # Local Postgres holding only the browser session tables.
+  DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@nuq-postgres:5432/${POSTGRES_DB:-postgres}}
+  # Tool-capable model for features rerouted from Gemini (interact, query).
+  LOCAL_FALLBACK_MODEL_NAME: ${LOCAL_FALLBACK_MODEL_NAME:-ministral-3:14b}
 
 services:
   playwright-service:
@@ -311,6 +317,123 @@ services:
         max-file: "3"
         compress: "true"
 
+  # ---------------------------------------------------------------------------
+  # Hangar: browser sessions (/v2/browser) and interact, each session in its
+  # own sandbox container. See SELF_HOST_OSS_FEATURES.md.
+  # ---------------------------------------------------------------------------
+  hangar:
+    restart: unless-stopped
+    build: apps/hangar/controller
+    environment:
+      DOCKER_HOST: tcp://hangar-docker-proxy:2375
+      SANDBOX_IMAGE: firecrawl-hangar-sandbox
+      SANDBOX_NETWORK: ${HANGAR_SANDBOX_NETWORK:-hangar-sandbox}
+      SANDBOX_SUBNET: ${HANGAR_SANDBOX_SUBNET:-10.250.250.0/24}
+      DATA_VOLUME: ${HANGAR_DATA_VOLUME:-hangar-data}
+      EGRESS_PROXY: http://hangar-egress:3128
+      PUBLIC_URL: ${HANGAR_PUBLIC_URL:-http://localhost:3030}
+      MAX_SESSIONS: ${HANGAR_MAX_SESSIONS:-4}
+      SANDBOX_MEMORY_MB: ${HANGAR_SANDBOX_MEMORY_MB:-2048}
+      SANDBOX_CPUS: ${HANGAR_SANDBOX_CPUS:-1.5}
+      SANDBOX_RUNTIME: ${HANGAR_SANDBOX_RUNTIME}
+    ports:
+      # Public gateway only (CDP, live view, recordings; per-session tokens).
+      # The internal API (3040) stays on the Docker network.
+      - "${HANGAR_PUBLIC_PORT:-3030}:3030"
+    volumes:
+      - hangar-data:/data
+    networks:
+      - backend
+      - hangar-sandbox
+      - hangar-control
+    depends_on:
+      - hangar-docker-proxy
+      - hangar-egress
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # The only path from sandboxes to the internet; refuses private targets.
+  hangar-egress:
+    restart: unless-stopped
+    build: apps/hangar/egress
+    environment:
+      PROXY_SERVER: ${PROXY_SERVER}
+      PROXY_USERNAME: ${PROXY_USERNAME}
+      PROXY_PASSWORD: ${PROXY_PASSWORD}
+    networks:
+      - backend
+      - hangar-sandbox
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  # Restricted Docker API for the controller: container endpoints only.
+  hangar-docker-proxy:
+    restart: unless-stopped
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 0
+      IMAGES: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      EXEC: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - hangar-control
+
+  # Builds the per-session sandbox image (not a running service):
+  #   docker compose --profile build build hangar-sandbox
+  hangar-sandbox:
+    profiles: ["build"]
+    build: apps/hangar/sandbox
+    image: firecrawl-hangar-sandbox
+
+  # One-shot: creates the browser session tables in nuq-postgres.
+  hangar-db-init:
+    image: postgres:17-alpine
+    restart: "no"
+    depends_on:
+      nuq-postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./apps/hangar/sessions-db.sql:/sessions-db.sql:ro
+    command:
+      - psql
+      - -h
+      - nuq-postgres
+      - -U
+      - ${POSTGRES_USER:-postgres}
+      - -d
+      - ${POSTGRES_DB:-postgres}
+      - -v
+      - ON_ERROR_STOP=1
+      - -f
+      - /sessions-db.sql
+    networks:
+      - backend
+
   # Ingestion UI. Upstream removed apps/ui in 2026 (#5012); this keeps the
   # previously built image running.
   ui:
@@ -374,8 +497,19 @@ services:
 networks:
   backend:
     driver: bridge
+  # Sandboxes only: no route out except through hangar-egress.
+  hangar-sandbox:
+    name: ${HANGAR_SANDBOX_NETWORK:-hangar-sandbox}
+    internal: true
+    ipam:
+      config:
+        - subnet: ${HANGAR_SANDBOX_SUBNET:-10.250.250.0/24}
+  hangar-control:
+    internal: true
 
 volumes:
+  hangar-data:
+    name: ${HANGAR_DATA_VOLUME:-hangar-data}
   redis:
   fdb-data:
   fdb-cluster-file:

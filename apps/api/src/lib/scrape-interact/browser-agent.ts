@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeAgentBrowserCommand } from "./normalize-agent-browser";
 import { promises as fs } from "fs";
 import path from "path";
 import { tool, stepCountIs, generateText as untracedGenerateText } from "ai";
@@ -304,7 +305,8 @@ export async function executePromptViaBrowserAgent(
     inputSchema: z.object({
       code: z.string().describe("The agent-browser command(s) to execute"),
     }),
-    execute: async ({ code }) => {
+    execute: async ({ code: rawCode }) => {
+      const code = normalizeAgentBrowserCommand(rawCode);
       toolCallCount++;
       const start = Date.now();
       debugLog.add(`--- [${toolCallCount}] ${code} ---`);

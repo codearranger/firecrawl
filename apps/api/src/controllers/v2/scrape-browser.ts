@@ -2,6 +2,7 @@ import { Response } from "express";
 import { z } from "zod";
 import { logger as _logger } from "../../lib/logger";
 import { config } from "../../config";
+import { selfHostedSessionDb } from "../../db/connection";
 import {
   getBrowserSession,
   getBrowserSessionFromScrape,
@@ -54,6 +55,7 @@ import { integrationSchema } from "../../utils/integration";
 import { applyAgentAuthDiscoveryHeader } from "../../lib/agent-auth-discovery";
 import { getScrapeJobAccess } from "../../lib/operational-job-access";
 import { readScrapeJobState } from "../../lib/job-state-store";
+import { readSelfHostedScrapeReplay } from "../../lib/selfhost-scrape-replay";
 import {
   type BrowserOptions,
   browserOptionsFromScrape,
@@ -173,11 +175,11 @@ async function scrapeInteractInternal(
 
   // --- Validate scrape ownership ---
 
-  if (config.USE_DB_AUTHENTICATION !== true) {
+  if (config.USE_DB_AUTHENTICATION !== true && !selfHostedSessionDb) {
     return res.status(501).json({
       success: false,
       error:
-        "Scrape interact requires stored scrape context and is not available when database authentication is disabled.",
+        "Scrape interact requires stored scrape context and is not available when database authentication is disabled. Self-hosted deployments can set DATABASE_URL to a Postgres with the browser session tables (apps/hangar/sessions-db.sql).",
     });
   }
 
@@ -190,9 +192,17 @@ async function scrapeInteractInternal(
       getBrowserSessionFromScrape(scrapeId),
     ]),
   );
+  const selfHostedReplay =
+    nuqJob || state ? null : await readSelfHostedScrapeReplay(scrapeId);
   const access = nuqJob
     ? null
-    : await withZeroDataRetention(true, () => getScrapeJobAccess(scrapeId));
+    : selfHostedReplay
+      ? {
+          teamId: selfHostedReplay.teamId,
+          kind: "scrape" as const,
+          expiresAtMs: selfHostedReplay.completedAtMs + 24 * 60 * 60 * 1000,
+        }
+      : await withZeroDataRetention(true, () => getScrapeJobAccess(scrapeId));
   if (
     (!nuqJob && (!access || access.expiresAtMs <= Date.now())) ||
     (nuqJob && nuqJob.data.mode !== "single_urls")
@@ -219,7 +229,7 @@ async function scrapeInteractInternal(
     storedSession?.zero_data_retention === true;
   logger = logger.child({ zeroDataRetention });
 
-  let replayContext = state?.replay;
+  let replayContext = state?.replay ?? selfHostedReplay?.replay;
   let replayError: string | undefined;
   if (!replayContext && nuqJob?.data.mode === "single_urls") {
     const replay = buildReplayContextFromScrape({

@@ -111,7 +111,8 @@ describe("self-hosted playwright extended features", () => {
     async () => {
       const doc = await scrape(
         {
-          url: EXAMPLE,
+          // example.com times out for mobile user agents over some proxies.
+          url: "https://www.iana.org",
           formats: ["markdown"],
           mobile: true,
           location: { country: "DE", languages: ["de-DE"] },
@@ -243,6 +244,118 @@ describe("self-hosted agent", () => {
       const res = await request(TEST_API_URL)
         .get("/v2/agent/019a5f0e-0000-7000-8000-00000000dead")
         .set("Authorization", `Bearer ${identity.apiKey}`);
+      expect(res.statusCode).toBe(404);
+    },
+    30000,
+  );
+});
+
+describe("self-hosted browser sessions (Hangar)", () => {
+  const HAS_HANGAR = TEST_SELF_HOST && !!config.HANGAR_URL;
+  const auth = () => `Bearer ${identity.apiKey}`;
+  const exec = (id: string, body: Record<string, unknown>) =>
+    request(TEST_API_URL)
+      .post(`/v2/browser/${id}/execute`)
+      .set("Authorization", auth())
+      .send(body);
+
+  concurrentIf(HAS_HANGAR)(
+    "creates a session and runs node, python and bash in it",
+    async () => {
+      const created = await request(TEST_API_URL)
+        .post("/v2/browser")
+        .set("Authorization", auth())
+        .send({ ttl: 120, activityTtl: 60 });
+      expect(created.statusCode).toBe(200);
+      expect(created.body.cdpUrl).toMatch(/^wss?:\/\//);
+      expect(created.body.liveViewUrl).toMatch(/^https?:\/\//);
+      const id = created.body.id;
+      try {
+        const node = await exec(id, {
+          language: "node",
+          code: "return 6 * 7;",
+        });
+        expect(node.body.exitCode).toBe(0);
+        expect(node.body.result).toBe("42");
+
+        const python = await exec(id, {
+          language: "python",
+          code: "print('py', 1 + 1)",
+        });
+        expect(python.body.stdout).toContain("py 2");
+
+        const bash = await exec(id, {
+          language: "bash",
+          code: "agent-browser get url",
+        });
+        expect(bash.body.exitCode).toBe(0);
+        expect(bash.body.stdout).toContain("about:blank");
+
+        // Sandboxes reach the internet only through the egress proxy, which
+        // refuses private addresses.
+        const lan = await exec(id, {
+          language: "node",
+          code: "const r = await page.goto('http://10.0.0.1/', { timeout: 20000 }); return r.status();",
+          timeout: 40,
+        });
+        expect(lan.body.result).toBe("403");
+      } finally {
+        await request(TEST_API_URL)
+          .delete(`/v2/browser/${id}`)
+          .set("Authorization", auth());
+      }
+    },
+    180000,
+  );
+
+  concurrentIf(HAS_HANGAR)(
+    "a stopped session refuses execution",
+    async () => {
+      const created = await request(TEST_API_URL)
+        .post("/v2/browser")
+        .set("Authorization", auth())
+        .send({ ttl: 60, activityTtl: 30 });
+      const id = created.body.id;
+      await request(TEST_API_URL)
+        .delete(`/v2/browser/${id}`)
+        .set("Authorization", auth());
+      const res = await exec(id, { language: "node", code: "return 1" });
+      expect(res.statusCode).toBe(410);
+    },
+    120000,
+  );
+
+  concurrentIf(HAS_HANGAR)(
+    "interact replays a scrape in a new session",
+    async () => {
+      const doc = await scrape(
+        {
+          url: "https://www.iana.org/domains/reserved",
+          timeout: scrapeTimeout,
+        },
+        identity,
+      );
+      const scrapeId = doc.metadata.scrapeId;
+      const res = await request(TEST_API_URL)
+        .post(`/v2/scrape/${scrapeId}/interact`)
+        .set("Authorization", auth())
+        .send({ code: "console.log(page.url())", timeout: 60 });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.stdout).toContain("iana.org/domains/reserved");
+      await request(TEST_API_URL)
+        .delete(`/v2/scrape/${scrapeId}/interact`)
+        .set("Authorization", auth());
+    },
+    240000,
+  );
+
+  concurrentIf(HAS_HANGAR)(
+    "interact on an unknown scrape is 404",
+    async () => {
+      const res = await request(TEST_API_URL)
+        .post("/v2/scrape/019a5f0e-0000-7000-8000-00000000beef/interact")
+        .set("Authorization", auth())
+        .send({ code: "console.log(1)" });
       expect(res.statusCode).toBe(404);
     },
     30000,

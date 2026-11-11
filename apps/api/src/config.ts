@@ -705,6 +705,11 @@ const configSchema = z.object({
 
   // AI/ML
   MODEL_NAME: z.string().optional(),
+  // Model used when a feature hard-wired to an unconfigured provider (Gemini,
+  // Fireworks, ...) is rerouted to the default provider. Falls back to
+  // MODEL_NAME. Useful when MODEL_NAME is a small extraction model but the
+  // rerouted features (interact agent, query) need tool calling.
+  LOCAL_FALLBACK_MODEL_NAME: z.string().optional(),
   // Optional OpenAI-compatible provider for JSON extraction. Traffic is routed
   // by team cohort (stable hash) at ROLLOUT_PERCENT, mirrored without using the
   // result at SHADOW_PERCENT, and always routed for TEAM_IDS. Any failure falls
@@ -849,6 +854,12 @@ const configSchema = z.object({
 
   // Browser Service
   HANGAR_URL: z.url().optional(),
+  // Concurrent browser sessions allowed when USE_DB_AUTHENTICATION is off.
+  SELF_HOSTED_BROWSER_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
 
   // Audio (avgrab)
   AVGRAB_SERVICE_URL: z.string().optional(),

@@ -207,7 +207,9 @@ export function getModel(
     // The requested model name belongs to the unavailable provider, so the
     // deployment's MODEL_NAME is used even when the caller asked to ignore it.
     return withUsageTelemetry(
-      providerList[fallback](config.MODEL_NAME || name),
+      providerList[fallback](
+        config.LOCAL_FALLBACK_MODEL_NAME || config.MODEL_NAME || name,
+      ),
     );
   }
   const modelName = options?.ignoreModelOverride

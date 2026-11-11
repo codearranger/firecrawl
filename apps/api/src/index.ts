@@ -38,6 +38,7 @@ import { nuqShutdown } from "./services/worker/nuq";
 import { getErrorContactMessage } from "./lib/deployment";
 import { initializeBlocklist } from "./scraper/WebScraper/utils/blocklist";
 import { warmExchangeCatalog } from "./lib/exchange";
+import { startSelfHostedBrowserMaintenance } from "./lib/selfhost-browser-maintenance";
 import { initializeEngineForcing } from "./scraper/WebScraper/utils/engine-forcing";
 import responseTime from "response-time";
 import { shutdownWebhookQueue } from "./services/webhook";
@@ -206,6 +207,7 @@ async function startServer(port = DEFAULT_PORT) {
     await initializeBlocklist();
     initializeEngineForcing();
     warmExchangeCatalog();
+    startSelfHostedBrowserMaintenance();
   } catch (error) {
     logger.error("Failed to initialize API startup dependencies", {
       error,

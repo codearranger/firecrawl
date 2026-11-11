@@ -1,0 +1,9 @@
+{
+  "name": "hangar-egress",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc", "start": "node dist/egress.js" },
+  "dependencies": { "ipaddr.js": "2.3.0", "proxy-chain": "2.7.1" },
+  "devDependencies": { "@types/node": "22.15.30", "typescript": "5.9.3" }
+}

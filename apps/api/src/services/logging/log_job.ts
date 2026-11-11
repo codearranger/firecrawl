@@ -42,6 +42,7 @@ import {
   writeScrapeJobState,
 } from "../../lib/job-state-store";
 import { buildReplayContextFromScrape } from "../../lib/scrape-interact/scrape-replay";
+import { writeSelfHostedScrapeReplay } from "../../lib/selfhost-scrape-replay";
 import { browserOptionsFromScrape } from "../../lib/browser-options";
 import {
   initializeRequestCredits,
@@ -686,6 +687,16 @@ async function logScrapeInternal(scrape: LoggedScrape, hooks?: LogScrapeHooks) {
             }),
       });
       stateOutcome = written ? "written" : "skipped";
+      // Self-hosted without Bigtable: keep what interact needs in Redis.
+      if (!written && replay && scrape.is_successful) {
+        await writeSelfHostedScrapeReplay(scrape.id, {
+          teamId: storedTeamId,
+          replay,
+          completedAtMs: Date.now(),
+        }).catch(error =>
+          logger.warn("Failed to store self-hosted scrape replay", { error }),
+        );
+      }
     }
   } catch (error) {
     stateOutcome = "failed";

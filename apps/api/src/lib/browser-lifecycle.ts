@@ -242,8 +242,11 @@ async function createBrowserSessionInternal(
   let estimatedCredits = shouldBill
     ? calculateBrowserSessionCredits(ttl * 1000, creditsPerHour)
     : 0;
-  const teamLimit =
-    req.acuc?.concurrency_limit ?? DEFAULT_TEAM_LIMITS.concurrency_limit;
+  // Self-hosted without DB auth every request is the "bypass" team on the
+  // free-plan default (2); the self-hosted Hangar enforces its own cap.
+  const teamLimit = !config.USE_DB_AUTHENTICATION
+    ? config.SELF_HOSTED_BROWSER_CONCURRENCY
+    : (req.acuc?.concurrency_limit ?? DEFAULT_TEAM_LIMITS.concurrency_limit);
   // An agent run opens browsers against the team's own slots, so a free team
   // (2) is throttled by its own agent. Floor trusted agent traffic at hobby,
   // as the rate limiter does; plans at or above hobby are unchanged.

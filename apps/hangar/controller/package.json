@@ -1,0 +1,14 @@
+{
+  "name": "hangar-controller",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted Hangar browser service for Firecrawl (sessions in sandbox containers)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "node --test dist/*.test.js"
+  },
+  "dependencies": { "ws": "8.18.3" },
+  "devDependencies": { "@types/node": "22.15.30", "@types/ws": "8.18.1", "typescript": "5.9.3" }
+}

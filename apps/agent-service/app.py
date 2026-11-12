@@ -41,6 +41,9 @@ FIRECRAWL_API_URL = os.environ.get("FIRECRAWL_API_URL", "http://api:3002").rstri
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://ollama:11434/v1").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "ollama")
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "ministral-3:14b")
+# "none" turns thinking off on local thinking models (gemma4, qwen3.x);
+# models without thinking ignore it. Empty = do not send.
+AGENT_REASONING_EFFORT = os.environ.get("AGENT_REASONING_EFFORT", "")
 MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "12"))
 MAX_PAGE_CHARS = int(os.environ.get("AGENT_MAX_PAGE_CHARS", "12000"))
 LLM_TIMEOUT_S = float(os.environ.get("AGENT_LLM_TIMEOUT_S", "300"))
@@ -225,7 +228,12 @@ class Firecrawl:
 async def chat(client: httpx.AsyncClient, **body: Any) -> dict[str, Any]:
     resp = await client.post(
         f"{LLM_BASE_URL}/chat/completions",
-        json={"model": AGENT_MODEL, "temperature": 0, **body},
+        json={
+            "model": AGENT_MODEL,
+            "temperature": 0,
+            **({"reasoning_effort": AGENT_REASONING_EFFORT} if AGENT_REASONING_EFFORT else {}),
+            **body,
+        },
         headers={"Authorization": f"Bearer {LLM_API_KEY}"},
         timeout=LLM_TIMEOUT_S,
     )

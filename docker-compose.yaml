@@ -81,6 +81,7 @@ x-common-env: &common-env
   DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@nuq-postgres:5432/${POSTGRES_DB:-postgres}}
   # Tool-capable model for features rerouted from Gemini (interact, query).
   LOCAL_FALLBACK_MODEL_NAME: ${LOCAL_FALLBACK_MODEL_NAME:-ministral-3:14b}
+  LOCAL_FALLBACK_REASONING_EFFORT: ${LOCAL_FALLBACK_REASONING_EFFORT:-none}
 
 services:
   playwright-service:
@@ -299,6 +300,7 @@ services:
       LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}}
       LLM_API_KEY: ${OPENAI_API_KEY:-ollama}
       AGENT_MODEL: ${AGENT_MODEL:-ministral-3:14b}
+      AGENT_REASONING_EFFORT: ${AGENT_REASONING_EFFORT:-none}
       AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-12}
       SELF_HOSTED_WEBHOOK_HMAC_SECRET: ${SELF_HOSTED_WEBHOOK_HMAC_SECRET}
     extra_hosts:

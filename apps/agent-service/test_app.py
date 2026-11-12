@@ -162,3 +162,14 @@ def test_threads_unsupported(setup):
         "/internal/extracts", json={"id": RUN_ID, "prompt": "q", "threadId": "t"}, headers=AUTH
     )
     assert r.status_code == 503
+
+
+def test_reasoning_effort_sent_when_configured(setup, monkeypatch):
+    monkeypatch.setattr(agent_app, "AGENT_REASONING_EFFORT", "none")
+    fake = Fake([tool_call("finish", {"notes": "n"}), {"role": "assistant", "content": "done"}])
+    with setup(fake) as client:
+        client.post("/internal/extracts", json={"id": RUN_ID, "prompt": "q"}, headers=AUTH)
+        wait_done(client)
+    llm_calls = [b for p, b in fake.requests if p.endswith("/chat/completions")]
+    assert llm_calls and all(b["reasoning_effort"] == "none" for b in llm_calls)
+

@@ -192,6 +192,20 @@ export function resolveLocalFallback(
   return undefined;
 }
 
+const localFallbackReasoning: LanguageModelMiddleware = {
+  specificationVersion: "v3",
+  transformParams: async ({ params }) => ({
+    ...params,
+    providerOptions: {
+      ...params.providerOptions,
+      openai: {
+        reasoningEffort: config.LOCAL_FALLBACK_REASONING_EFFORT,
+        ...params.providerOptions?.openai,
+      },
+    },
+  }),
+};
+
 export function getModel(
   name: string,
   provider: Provider = defaultProvider,
@@ -206,11 +220,19 @@ export function getModel(
   if (fallback) {
     // The requested model name belongs to the unavailable provider, so the
     // deployment's MODEL_NAME is used even when the caller asked to ignore it.
-    return withUsageTelemetry(
-      providerList[fallback](
-        config.LOCAL_FALLBACK_MODEL_NAME || config.MODEL_NAME || name,
-      ),
-    );
+    const fallbackName =
+      config.LOCAL_FALLBACK_MODEL_NAME || config.MODEL_NAME || name;
+    if (fallback === "openai" && config.LOCAL_FALLBACK_REASONING_EFFORT) {
+      // Chat Completions forwards reasoning_effort for any model name; the
+      // Responses API drops it for models the SDK does not know.
+      return withUsageTelemetry(
+        wrapLanguageModel({
+          model: providerList.openai.chat(fallbackName),
+          middleware: localFallbackReasoning,
+        }),
+      );
+    }
+    return withUsageTelemetry(providerList[fallback](fallbackName));
   }
   const modelName = options?.ignoreModelOverride
     ? name

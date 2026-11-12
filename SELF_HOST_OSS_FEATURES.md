@@ -70,6 +70,7 @@ signed with `SELF_HOSTED_WEBHOOK_HMAC_SECRET` when it is set.
 | `AGENT_LLM_BASE_URL` | `OPENAI_BASE_URL` | OpenAI-compatible chat endpoint |
 | `AGENT_MODEL` | `ministral-3:14b` | needs tool calling; non-thinking models are much faster |
 | `AGENT_MAX_STEPS` | `12` | tool calls per run |
+| `AGENT_REASONING_EFFORT` | `none` (compose) | sent as `reasoning_effort`; `none` turns thinking off on thinking models |
 
 The API skips its Bigtable job-access check for agent jobs when
 `USE_DB_AUTHENTICATION` is off and `BIGTABLE_JOB_ACCESS_TABLE` is unset.
@@ -153,6 +154,7 @@ docker compose up -d hangar-db-init hangar hangar-egress hangar-docker-proxy api
 | `HANGAR_SANDBOX_RUNTIME` | — | e.g. `runsc` |
 | `SELF_HOSTED_BROWSER_CONCURRENCY` | `10` | API-side cap when DB auth is off |
 | `LOCAL_FALLBACK_MODEL_NAME` | `ministral-3:14b` (compose) | model for the interact agent and other rerouted features |
+| `LOCAL_FALLBACK_REASONING_EFFORT` | `none` (compose) | sent as `reasoning_effort` on rerouted calls; `none` turns thinking off on gemma4/qwen3.x |
 
 Without DB authentication the API keeps browser sessions in the
 `browser_sessions`, `browser_profiles` and `browser_session_activities` tables

@@ -710,6 +710,12 @@ const configSchema = z.object({
   // MODEL_NAME. Useful when MODEL_NAME is a small extraction model but the
   // rerouted features (interact agent, query) need tool calling.
   LOCAL_FALLBACK_MODEL_NAME: z.string().optional(),
+  // reasoning_effort sent with rerouted calls on an OpenAI-compatible
+  // endpoint. "none" turns thinking off on local thinking models (gemma4,
+  // qwen3.x), which is much faster; models without thinking ignore it.
+  LOCAL_FALLBACK_REASONING_EFFORT: blankStringAsUnset(
+    z.enum(["none", "minimal", "low", "medium", "high"]).optional(),
+  ),
   // Optional OpenAI-compatible provider for JSON extraction. Traffic is routed
   // by team cohort (stable hash) at ROLLOUT_PERCENT, mirrored without using the
   // result at SHADOW_PERCENT, and always routed for TEAM_IDS. Any failure falls

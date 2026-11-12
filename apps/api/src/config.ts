@@ -861,6 +861,11 @@ const configSchema = z.object({
   // Browser Service
   HANGAR_URL: z.url().optional(),
   // Concurrent browser sessions allowed when USE_DB_AUTHENTICATION is off.
+  // Self-hosted media store: inline screenshots/PDFs are written here and
+  // returned as ${SELF_HOSTED_MEDIA_PUBLIC_URL}/v2/media/<name> URLs.
+  SELF_HOSTED_MEDIA_DIR: blankStringAsUnset(z.string().optional()),
+  SELF_HOSTED_MEDIA_PUBLIC_URL: blankStringAsUnset(z.string().url().optional()),
+  SELF_HOSTED_MEDIA_TTL_HOURS: z.coerce.number().positive().default(24),
   SELF_HOSTED_BROWSER_CONCURRENCY: z.coerce
     .number()
     .int()

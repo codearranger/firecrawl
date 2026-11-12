@@ -1,4 +1,5 @@
 import express from "express";
+import { mediaController } from "../lib/selfhost-media";
 import multer from "multer";
 import { config } from "../config";
 import { RateLimiterMode } from "../types";
@@ -196,6 +197,10 @@ v2Router.use(requestTimingMiddleware("v2"));
 // Internal: trusted-proxy (hosted MCP) keyless eligibility probe. Secret-gated
 // inside the controller; no auth middleware.
 v2Router.get("/keyless/eligibility", wrap(keylessEligibilityController));
+
+// Self-hosted media store (screenshots, action PDFs). Names are unguessable,
+// like the hosted media bucket's object URLs, so no API key is required.
+v2Router.get("/media/:name", wrap(mediaController));
 
 // World ID verification for the keyless tier: a device flow that ends in a
 // credential for the x-firecrawl-world-id header. 404 unless configured.

@@ -23,6 +23,15 @@ replacements so a self-hosted deployment can use them with local models.
 `docker-compose.yaml` turns all of these on by default; each variable can be
 overridden in `.env`.
 
+**Screenshots and action PDFs are returned as links**, like the hosted API's
+media URLs, instead of inline base64 (which is 100 KB+ per image and
+overflows LLM/MCP tool output). They are stored under `SELF_HOSTED_MEDIA_DIR`
+(compose: the `media` volume), served by `GET /v2/media/<random>.png` and
+deleted after `SELF_HOSTED_MEDIA_TTL_HOURS` (24). Set
+`SELF_HOSTED_MEDIA_PUBLIC_URL` to the API address clients use. Names are
+unguessable and need no API key; zero-data-retention scrapes stay inline. Set
+`SELF_HOSTED_MEDIA_DIR=` (empty) to keep inline data everywhere.
+
 ## Not covered
 
 - **Browser session suspend/resume and proxy country selection.** Hangar

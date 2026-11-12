@@ -1,4 +1,8 @@
 import { parseMarkdown } from "../../../lib/html-to-markdown";
+import {
+  selfHostedMediaEnabled,
+  storeInlineMedia,
+} from "../../../lib/selfhost-media";
 import { Meta } from "..";
 import { Document } from "../../../controllers/v2/types";
 import { htmlTransform } from "../lib/removeUnwantedElements";
@@ -618,6 +622,40 @@ function coerceFieldsToFormats(meta: Meta, document: Document): Document {
   return document;
 }
 
+/**
+ * Self-hosted: replace inline (base64 data: URL) screenshots and action PDFs
+ * with short URLs to the local media store, like the hosted API's media
+ * bucket links. Zero-data-retention scrapes keep inline data.
+ */
+async function storeInlineMediaAsUrls(
+  meta: Meta,
+  document: Document,
+): Promise<Document> {
+  if (!selfHostedMediaEnabled() || meta.internalOptions.zeroDataRetention) {
+    return document;
+  }
+  try {
+    if (document.screenshot) {
+      document.screenshot = await storeInlineMedia(document.screenshot);
+    }
+    if (document.actions?.screenshots?.length) {
+      document.actions.screenshots = await Promise.all(
+        document.actions.screenshots.map(storeInlineMedia),
+      );
+    }
+    if (document.actions?.pdfs?.length) {
+      document.actions.pdfs = await Promise.all(
+        document.actions.pdfs.map(storeInlineMedia),
+      );
+    }
+  } catch (error) {
+    meta.logger.warn("Failed to store inline media; returning it inline", {
+      error,
+    });
+  }
+  return document;
+}
+
 // TODO: allow some of these to run in parallel
 const transformerStack: Transformer[] = [
   deriveHTMLFromRawHTML,
@@ -643,6 +681,7 @@ const transformerStack: Transformer[] = [
   deriveDiff,
   fetchAudio,
   fetchVideo,
+  storeInlineMediaAsUrls,
   coerceFieldsToFormats,
 ];
 

@@ -82,6 +82,10 @@ x-common-env: &common-env
   # Tool-capable model for features rerouted from Gemini (interact, query).
   LOCAL_FALLBACK_MODEL_NAME: ${LOCAL_FALLBACK_MODEL_NAME:-ministral-3:14b}
   LOCAL_FALLBACK_REASONING_EFFORT: ${LOCAL_FALLBACK_REASONING_EFFORT:-none}
+  # Screenshots/PDFs are stored here and returned as short URLs instead of
+  # inline base64 (set SELF_HOSTED_MEDIA_PUBLIC_URL to the API's address).
+  SELF_HOSTED_MEDIA_DIR: ${SELF_HOSTED_MEDIA_DIR-/data/media}
+  SELF_HOSTED_MEDIA_PUBLIC_URL: ${SELF_HOSTED_MEDIA_PUBLIC_URL:-http://localhost:3002}
 
 services:
   playwright-service:
@@ -147,6 +151,7 @@ services:
       - "${PORT:-3002}:${INTERNAL_PORT:-3002}"
     volumes:
       - fdb-cluster-file:/var/fdb:ro
+      - media:/data/media
     command: node dist/src/harness.js --start-docker
     # Resource limits for Docker Compose (not Swarm)
     # Increase if you have more CPU cores/RAM available
@@ -510,6 +515,7 @@ networks:
     internal: true
 
 volumes:
+  media:
   hangar-data:
     name: ${HANGAR_DATA_VOLUME:-hangar-data}
   redis:

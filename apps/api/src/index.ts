@@ -39,6 +39,7 @@ import { getErrorContactMessage } from "./lib/deployment";
 import { initializeBlocklist } from "./scraper/WebScraper/utils/blocklist";
 import { warmExchangeCatalog } from "./lib/exchange";
 import { startSelfHostedBrowserMaintenance } from "./lib/selfhost-browser-maintenance";
+import { startSelfHostedMediaCleanup } from "./lib/selfhost-media";
 import { initializeEngineForcing } from "./scraper/WebScraper/utils/engine-forcing";
 import responseTime from "response-time";
 import { shutdownWebhookQueue } from "./services/webhook";
@@ -208,6 +209,7 @@ async function startServer(port = DEFAULT_PORT) {
     initializeEngineForcing();
     warmExchangeCatalog();
     startSelfHostedBrowserMaintenance();
+    startSelfHostedMediaCleanup();
   } catch (error) {
     logger.error("Failed to initialize API startup dependencies", {
       error,
